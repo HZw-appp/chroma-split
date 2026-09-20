@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>色阱·分裂</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #0a0a0a;
+    cursor: none;                 /* 隐藏系统鼠标，使用自定义准星 */
+    user-select: none;
+  }
+  /* 开始游戏界面 / 死亡界面：恢复系统默认指针，鼠标可自由移动 */
+  body.cursor-default { cursor: default; }
+  #game { display: block; }
+
+  /* 左上角 HUD */
+  #hud {
+    position: fixed;
+    top: 14px;
+    left: 16px;
+    z-index: 2;
+    pointer-events: none;
+    font: 600 15px/1.6 Consolas, "Courier New", monospace;
+    color: #e8e8ff;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.35);
+    white-space: pre-line;
+  }
+
+  /* 右上角玩法说明按钮 */
+  #helpBtn {
+    position: fixed;
+    top: 14px;                 /* 与 HUD 行水平对齐 */
+    right: 16px;
+    z-index: 4;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid #ffffff;
+    color: #ffffff;
+    font-size: 20px;
+    font-weight: bold;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+  }
+  #helpBtn:hover { background: rgba(255, 255, 255, 0.3); }
+  #helpBtn:disabled { opacity: 0.35; cursor: default; }
+
+  /* 玩法说明遮罩 */
+  #helpOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.75);
+  }
+  #helpOverlay.hidden { display: none; }
+  .help-panel {
+    max-width: 640px;
+    padding: 28px 40px;
+    text-align: center;
+  }
+  .help-text {
+    font: 20px/1.8 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #ffffff;
+    text-align: center;
+  }
+  .help-text .gap { height: 0.9em; }
+  #helpCloseBtn {
+    margin-top: 26px;
+    padding: 8px 30px;
+    font-size: 18px;
+    color: #ffffff;
+    background: transparent;
+    border: 1px solid #ffffff;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  #helpCloseBtn:hover { background: rgba(255, 255, 255, 0.12); }
+
+  /* 游戏结束遮罩 */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 10, 10, 0.78);
+  }
+  #overlay.hidden { display: none; }
+
+  /* 开始游戏遮罩：排布与死亡界面一致（位于右上角问号按钮之下，保证问号可点击） */
+  #startOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 10, 10, 0.78);
+  }
+  #startOverlay.hidden { display: none; }
+
+  .panel {
+    min-width: 320px;
+    padding: 42px 58px;
+    text-align: center;
+    border: 1px solid rgba(255, 0, 85, 0.55);
+    border-radius: 14px;
+    background: rgba(16, 12, 18, 0.94);
+    box-shadow: 0 0 34px rgba(255, 0, 85, 0.35);
+    font-family: Consolas, "Courier New", monospace;
+    color: #f0eefb;
+  }
+  .panel h1 {
+    font-size: 44px;
+    letter-spacing: 10px;
+    color: #FF0055;
+    text-shadow: 0 0 20px #FF0055;
+    margin-bottom: 18px;
+    white-space: nowrap;          /* 大号标题文字不允许换行 */
+  }
+  .panel p { font-size: 17px; margin: 9px 0; color: #dcd8ff; }
+  /* 开始界面中间的小号白色说明文字：允许按大小需要换行 */
+  .panel .start-hint {
+    color: #ffffff;
+    white-space: normal;
+  }
+  .panel button {
+    margin-top: 24px;
+    padding: 12px 40px;
+    font-size: 18px;
+    letter-spacing: 5px;
+    color: #0a0a0a;
+    background: #FFDD00;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    box-shadow: 0 0 16px rgba(255, 221, 0, 0.6);
+    transition: box-shadow 0.15s, transform 0.15s;
+    white-space: nowrap;          /* 按钮文字不允许换行 */
+  }
+  .panel button:hover {
+    box-shadow: 0 0 28px rgba(255, 221, 0, 0.95);
+    transform: translateY(-1px);
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">Combo: 0 | 最高连击: 0&#10;存活：0.0s</div>
+<button id="helpBtn" type="button">?</button>
+
+<div id="overlay" class="hidden">
+  <div class="panel">
+    <h1>游戏结束</h1>
+    <p>存活时间：<span id="statTime">0.0</span> 秒</p>
+    <p>最高连击：<span id="statCombo">0</span></p>
+    <button id="retryBtn">重新开始</button>
+  </div>
+</div>
+
+<div id="startOverlay">
+  <div class="panel">
+    <h1>开始游戏</h1>
+    <p class="start-hint">点击右上角问号可以查看规则</p>
+    <button id="startBtn" type="button">点击开始游戏</button>
+  </div>
+</div>
+
+<div id="helpOverlay" class="hidden">
+  <div class="help-panel">
+    <div class="help-text">
+      <div>🎯 目标：阻止方块触底，坚持越久越好！</div>
+      <div class="gap"></div>
+      <div>🖱️ 滚轮——切换准星颜色（红→青→黄→紫）</div>
+      <div>🖱️ 左键点击——消除同色方块</div>
+      <div>⚠️ 射错颜色——方块会分裂成2个小方块（继承下落速度，左右飞散）</div>
+      <div>🔥 连击——连续消除放大冲击波范围</div>
+      <div>🚀 空格键——反转（所有方块原地转为向上飞，重力再慢慢拉回，仅限2次）</div>
+      <div class="gap"></div>
+      <div>⚡ 方块从静止开始持续加速下落</div>
+      <div>⚡ 生成频率只随时间上升，45 秒达到最快（与场上方块数量无关）</div>
+      <div>💡 小提示：优先清理大块，避免触底！</div>
+    </div>
+    <button id="helpCloseBtn" type="button">我知道了</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ============================================================
+ * 色阱·分裂 —— 单文件霓虹风 Canvas 小游戏
+ * 核心规则严格遵循需求文档，无额外玩法规则。
+ * ============================================================ */
+
+/* ---------- 常量 ---------- */
+// 四种霓虹色（按准星切换顺序：红 -> 青 -> 黄 -> 紫）
+const COLORS = [
+  { hex: '#FF0055', letter: 'R' }, // 红
+  { hex: '#00FFCC', letter: 'C' }, // 青
+  { hex: '#FFDD00', letter: 'Y' }, // 黄
+  { hex: '#AA66FF', letter: 'P' }  // 紫
+];
+
+// 动态难度基准配置：难度只随游戏时长平滑爬坡，与场上方块数量无关
+const DIFFICULTY_CONFIG = {
+  minSpawnInterval: 450,       // 最快生成间隔（毫秒），45 秒时达到（生成频率最大值）
+  maxSpawnInterval: 900,       // 最慢生成间隔（毫秒），开局值（生成频率最小值）
+  rampUpDuration: 45,          // 爬坡总时长（秒），达到后生成频率封顶不再提高
+};
+
+// 重力加速度（px/帧²，全局恒定值）：
+// 修改前大色块的下落速度 = 修改后大色块下落 1 秒（60 帧）后的速度
+// => a = 1.8 / 60 = 0.03 px/帧²
+const LEGACY_BIG_BLOCK_SPEED = 1.8;                          // 修改前大色块下落速度 px/帧
+const BASE_ACCEL             = LEGACY_BIG_BLOCK_SPEED / 60;  // 0.03 px/帧²
+
+const SPLIT_VX_MIN       = 1.5;     // 分裂小色块水平分速度下限 px/帧
+const SPLIT_VX_MAX       = 3.5;     // 分裂小色块水平分速度上限 px/帧
+
+const BLOCK_BASE_SIZE    = 40;      // 方块初始边长 px
+const PARTICLE_LIFETIME  = 500;     // 分裂粒子存活时长 ms
+const BLAST_BASE_RADIUS   = 60;     // 冲击波初始半径 px
+const BLAST_RADIUS_PER_COMBO = 4;   // 每点 Combo 增加半径
+const BLAST_MAX_RADIUS    = 350;    // 冲击波半径上限
+const REVERSAL_MAX        = 2;      // 重力反转整局可用次数
+
+// 重力反转技能条（底部中央可视化）
+const SKILL_BAR = {
+  width: 240,         // 总长度 px（5 + 110 + 10 + 110 + 5）
+  height: 18,         // 高度 px
+  cellWidth: 110,     // 单个格子宽 px
+  gap: 10,            // 两格间距 px
+  sideMargin: 5,      // 左右留白，使容器总宽正好 240px
+  bottomOffset: 40,   // 距画布底部边缘 40px
+  fillColor: '#00FFFF',   // 高亮填充色
+  emptyColor: '#333333',  // 耗尽格暗灰色
+  emptyBorder: '#660000', // 0 次时的暗红色边框
+  flashDuration: 200      // 消耗熄灭闪烁时长 ms
+};
+
+/* ---------- DOM ---------- */
+const canvas    = document.getElementById('game');
+const ctx       = canvas.getContext('2d');
+const hudEl     = document.getElementById('hud');
+const overlayEl = document.getElementById('overlay');
+const retryBtn  = document.getElementById('retryBtn');
+const startOverlay = document.getElementById('startOverlay');
+const startBtn  = document.getElementById('startBtn');
+const helpBtn   = document.getElementById('helpBtn');
+const helpOverlay = document.getElementById('helpOverlay');
+const helpCloseBtn = document.getElementById('helpCloseBtn');
+retryBtn.addEventListener('click', () => resetGame()); // 重新开始：原局重置后直接重开（不再回到开始界面）
+
+/* ---------- 画布尺寸 ---------- */
+let W = 0;
+let H = 0;
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  cursur.x = W / 2;
+  cursur.y = H / 2;
+}
+window.addEventListener('resize', resize);
+
+/* ---------- 游戏对象 ---------- */
+const blocks = [];   // 全部方块（含分裂后的小方块）
+const blasts = [];   // 正在播放的冲击波
+const particles = []; // 分裂粒子（纯视觉，0.5s 后消失）
+let blockId = 0;     // 方块唯一编号
+
+// 准星（按需求文档命名 Cursur）：currentColor 默认红色
+const cursur = {
+  x: 0,
+  y: 0,
+  colorIndex: 0, // 切换顺序严格为 红->青->黄->紫->循环
+  get color() { return COLORS[this.colorIndex]; }
+};
+
+/* ---------- 局内状态 ---------- */
+let combo         = 0;
+let maxCombo      = 0;
+let reversalsLeft = REVERSAL_MAX;
+let difficultyProgress   = 0;                               // 难度进度 0~1（仅由存活时长决定）
+let currentSpawnInterval = DIFFICULTY_CONFIG.maxSpawnInterval; // 当前生成间隔
+let spawnTimer    = DIFFICULTY_CONFIG.maxSpawnInterval;
+let started       = false;    // 是否已点击“开始游戏”（进入前不生成、不计时）
+let gameOver      = false;
+let isPaused      = false;    // 玩法说明暂停状态
+let totalPausedTime = 0;      // 累计暂停毫秒数
+let pauseStartTime  = 0;      // 本次暂停开始时间戳
+let flashes       = [];       // 技能格消耗闪烁（{ index, start }）
+let gameStartTime = performance.now(); // 点击“开始游戏”时重新计时
+let lastTime      = gameStartTime;
+let rafId         = null;
+
+/* ---------- 生成 / 分裂 ---------- */
+function spawnBlock() {
+  const c = COLORS[(Math.random() * COLORS.length) | 0];
+  const x = BLOCK_BASE_SIZE / 2 + Math.random() * Math.max(1, W - BLOCK_BASE_SIZE);
+  blocks.push({
+    id: ++blockId,
+    x,                            // 界面顶部任意 x 轴位置
+    y: BLOCK_BASE_SIZE / 2,       // 方块上边缘贴住画布顶部
+    size: BLOCK_BASE_SIZE,
+    color: c.hex,
+    vx: 0,                        // 初始 x 轴速度：0
+    vy: 0,                        // 初始 y 轴速度：0（之后由加速度持续放大）
+    isSplitChild: false           // 是否为分裂出的小色块
+  });
+}
+
+// 随机数：返回 [min, max) 区间
+function rand(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+// Case B：分裂。移除原方块，生成两个更小的小方块：
+// y 轴速度完全继承原方块（与分裂前相等），并继续受同一加速度作用；
+// x 轴获得随机水平分速度，左块向左、右块向右，两者数值相同。颜色不变。
+function splitBlock(block, index) {
+  const newSize      = block.size / 1.8;
+  const offset       = block.size / 4;                          // 左右偏移 ±(原边长 / 4)，避免重叠
+  const vxSpeed      = rand(SPLIT_VX_MIN, SPLIT_VX_MAX);        // 左右两块共用的水平速度数值
+  const vyInherited  = block.vy;                                // y 轴速度：原样继承
+  blocks.splice(index, 1);
+  blocks.push(
+    { id: ++blockId, x: block.x - offset, y: block.y, size: newSize, color: block.color, vx: -vxSpeed, vy: vyInherited, isSplitChild: true }, // 左块：向左
+    { id: ++blockId, x: block.x + offset, y: block.y, size: newSize, color: block.color, vx:  vxSpeed, vy: vyInherited, isSplitChild: true }  // 右块：向右
+  );
+  spawnParticles(block.x, block.y, block.color); // 分裂彩蛋：原地炸开粒子
+}
+
+// 分裂粒子：6~10 个对应颜色小方块向四周随机飞散，纯视觉、无碰撞
+function spawnParticles(x, y, color) {
+  const count = 6 + Math.floor(Math.random() * 5); // 6~10 个
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const spd   = rand(1, 4.5); // 1 ~ 4.5 px/帧
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * spd,
+      vy: Math.sin(angle) * spd,
+      size: rand(3, 6), // 3~6 px
+      color,
+      age: 0
+    });
+  }
+}
+
+/* ---------- 射击与判定 ---------- */
+function shoot(x, y) {
+  if (!started || gameOver || isPaused) return; // 未开始、游戏结束或暂停时不再响应
+
+  // 冲击波半径：60 + Combo * 4，上限 350
+  const radius = Math.min(BLAST_BASE_RADIUS + combo * BLAST_RADIUS_PER_COMBO, BLAST_MAX_RADIUS);
+  const colorHex = cursur.color.hex;
+  blasts.push({ x, y, radius, colorHex, born: performance.now() });
+
+  let comboBroken = false;
+  // 倒序遍历：分裂/消除时原地 splice 不影响未遍历项
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    // 方块中心点到点击圆心距离 < 方块size/2 + 冲击波半径 => 被覆盖
+    if (Math.hypot(b.x - x, b.y - y) < b.size / 2 + radius) {
+      if (b.color === colorHex) {
+        // Case A：颜色匹配 -> 消除，Combo +1
+        blocks.splice(i, 1);
+        combo += 1;
+        if (combo > maxCombo) maxCombo = combo;
+      } else {
+        // Case B：颜色不匹配 -> 禁止消除，执行分裂
+        splitBlock(b, i);
+        comboBroken = true;
+      }
+    }
+  }
+  // 一旦发生分裂：Combo 归零（冲击波基础半径随之回到 60px）
+  if (comboBroken) combo = 0;
+}
+
+/* ---------- 重力反转 ---------- */
+function triggerReversal() {
+  if (!started || gameOver || reversalsLeft <= 0) return;
+  // 记录被消耗的格子，用于“由亮变暗”的 0.2s 熄灭反馈
+  flashes.push({ index: reversalsLeft - 1, start: performance.now() });
+  reversalsLeft -= 1;
+  // 一次性反转：方块位置不变、x 轴速度大小与方向不变，
+  // 仅将 y 轴速度按原数值改为向上（保留速度大小，只翻转方向）。
+  // 反转后加速度方向不变，仍持续向下，因此 vy 会按加速度常数线性回升
+  for (const b of blocks) b.vy = -Math.abs(b.vy);
+}
+
+/* ---------- 游戏结束 ---------- */
+function endGame() {
+  gameOver = true;
+  helpBtn.disabled = true;     // 游戏结束后禁用玩法说明按钮
+  cancelAnimationFrame(rafId);
+  document.getElementById('statTime').textContent  = ((performance.now() - gameStartTime - totalPausedTime) / 1000).toFixed(1);
+  document.getElementById('statCombo').textContent = String(maxCombo);
+  overlayEl.classList.remove('hidden');
+  updateCursorMode();          // 死亡界面：恢复系统默认指针
+  draw(performance.now());     // 重绘静态画面，清掉画布上残留的准星
+}
+
+/* ---------- 每帧更新 ---------- */
+function update(dt) {
+  // 动态难度：只与存活时长有关（0~1，rampUpDuration 秒后封顶）
+  // 存活时长 = 游戏开始至今 - 累计暂停时长（暂停期间完全冻结）
+  const elapsed = (performance.now() - gameStartTime - totalPausedTime) / 1000;
+  difficultyProgress = Math.min(elapsed / DIFFICULTY_CONFIG.rampUpDuration, 1);
+  // 生成间隔：仅随时间线性缩短，45 秒达到最快（生成频率最大值），不受场上方块数量影响
+  currentSpawnInterval = DIFFICULTY_CONFIG.maxSpawnInterval
+    - (DIFFICULTY_CONFIG.maxSpawnInterval - DIFFICULTY_CONFIG.minSpawnInterval) * difficultyProgress;
+
+  // 生成：只受时间影响，与当前方块数量无关
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    spawnTimer += currentSpawnInterval;
+    spawnBlock();
+  }
+
+  const step = dt / (1000 / 60);       // 将 px/帧 折算为帧率无关的步长
+  // 全局恒定加速度：方向恒为向下（反转只翻转方块当时的 y 轴速度方向，
+  // 不改变加速度本身，因此被反转的方块 vy 会按加速度常数线性回升）
+  const accel = BASE_ACCEL * step;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    // 速度：所有色块（大色块与分裂小色块）每帧都被同一加速度放大
+    b.vy += accel;
+
+    // 水平位移（大色块 vx 恒为 0，分裂小色块按各自的 vx 飞散）
+    b.x += b.vx * step;
+    // 左右边界反弹：碰到边界修正位置并反转水平速度，防止飞出视野
+    if (b.x - b.size / 2 < 0) {
+      b.x = Math.max(b.size / 2, b.x); // 修正到安全位置
+      b.vx = -b.vx;
+    } else if (b.x + b.size / 2 > W) {
+      b.x = Math.min(W - b.size / 2, b.x); // 修正到安全位置
+      b.vx = -b.vx;
+    }
+
+    // 垂直位移：初速度为 0，随后被加速度逐渐放大
+    b.y += b.vy * step;
+
+    // 失败条件：任意方块 y + size/2 > 画布高度
+    if (b.y + b.size / 2 > H) { endGame(); return; }
+  }
+
+  // 分裂粒子：纯视觉，0.5s 后消失
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * step;
+    p.y += p.vy * step;
+    p.age += dt;
+    if (p.age >= PARTICLE_LIFETIME) particles.splice(i, 1);
+  }
+
+  // 左上角 HUD：Combo、最高连击、存活时间（反转次数由底部技能条展示）
+  hudEl.textContent = `Combo: ${combo} | 最高连击: ${maxCombo}\n存活：${elapsed.toFixed(1)}s`;
+}
+
+/* ---------- 渲染 ---------- */
+function draw(now) {
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  // 方块：发光阴影只对活动（在屏）方块开启，兼顾性能
+  for (const b of blocks) {
+    const visible = b.y + b.size / 2 > 0 && b.y - b.size / 2 < H;
+    if (visible) {
+      ctx.shadowBlur  = 12;
+      ctx.shadowColor = b.color;
+    } else {
+      ctx.shadowBlur = 0;
+    }
+    ctx.fillStyle = b.color;
+    ctx.fillRect(b.x - b.size / 2, b.y - b.size / 2, b.size, b.size);
+    ctx.lineWidth   = 2; // 2px 发光边缘
+    ctx.strokeStyle = b.color;
+    ctx.strokeRect(b.x - b.size / 2, b.y - b.size / 2, b.size, b.size);
+  }
+  ctx.shadowBlur = 0;
+
+  drawParticles(now);
+  drawBlasts(now);
+  drawSkillBar(now);
+  if (started && !gameOver) drawCrosshair(); // 开始界面与死亡界面不显示游戏准星
+}
+
+// 分裂粒子：对应颜色小方块向四周飞散，随寿命淡出
+function drawParticles(now) {
+  for (const p of particles) {
+    const alpha = Math.max(0, 1 - p.age / PARTICLE_LIFETIME);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle   = p.color;
+    ctx.shadowBlur  = 6;
+    ctx.shadowColor = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    ctx.restore();
+  }
+}
+
+// 冲击波：扩散光环，扩散速度与半径由发射时的 Combo 决定
+function drawBlasts(now) {
+  for (let i = blasts.length - 1; i >= 0; i--) {
+    const bl   = blasts[i];
+    const age  = now - bl.born;
+    const grow = Math.min(age / 170, 1);    // 170ms 内扩散到判定半径
+    const fade = 1 - Math.min(age / 520, 1); // 随后淡出
+    if (fade <= 0) { blasts.splice(i, 1); continue; }
+
+    const ease = 1 - Math.pow(1 - grow, 3);
+    const r    = 10 + (bl.radius - 10) * ease;
+
+    ctx.save();
+    ctx.globalAlpha = 0.55 * fade;
+    ctx.shadowBlur  = 20;
+    ctx.shadowColor = bl.colorHex;
+    ctx.strokeStyle = bl.colorHex;
+    ctx.lineWidth   = 3;
+    ctx.beginPath();
+    ctx.arc(bl.x, bl.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.16 * fade;
+    ctx.fillStyle   = bl.colorHex;
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ---------- 重力反转技能条 ---------- */
+// 十六进制颜色线性插值（用于熄灭闪烁过渡）
+function lerpColor(hexA, hexB, t) {
+  const a = [parseInt(hexA.slice(1, 3), 16), parseInt(hexA.slice(3, 5), 16), parseInt(hexA.slice(5, 7), 16)];
+  const b = [parseInt(hexB.slice(1, 3), 16), parseInt(hexB.slice(3, 5), 16), parseInt(hexB.slice(5, 7), 16)];
+  const c = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+// 底部中央技能条：两个等宽格子对应 2 次重力反转，主循环每帧重绘实时同步
+function drawSkillBar(now) {
+  const cx   = W / 2;
+  const top  = H - SKILL_BAR.bottomOffset - SKILL_BAR.height; // 底部边缘上方 40px
+  const left = cx - SKILL_BAR.width / 2;
+  const cellX = [
+    left + SKILL_BAR.sideMargin,
+    left + SKILL_BAR.sideMargin + SKILL_BAR.cellWidth + SKILL_BAR.gap
+  ];
+  const exhausted = reversalsLeft <= 0;
+
+  ctx.save();
+  for (let i = 0; i < 2; i++) {
+    const x      = cellX[i];
+    const lit    = i < reversalsLeft;                       // 剩余次数决定高亮格
+    const border = exhausted ? SKILL_BAR.emptyBorder : SKILL_BAR.fillColor;
+    const flash  = flashes.find((f) => f.index === i);      // 本格是否在熄灭闪烁中
+
+    // 填充色：高亮 / 暗灰 / 闪烁过渡（由亮到暗，0.2s）
+    let fill = lit ? SKILL_BAR.fillColor : SKILL_BAR.emptyColor;
+    if (flash) {
+      const p = Math.min((now - flash.start) / SKILL_BAR.flashDuration, 1);
+      fill = lerpColor(SKILL_BAR.fillColor, SKILL_BAR.emptyColor, p * p);
+    }
+
+    // 剩余 0 次时整条叠加 30% 透明度
+    ctx.globalAlpha = exhausted ? 0.3 : 1;
+
+    // 微弱发光的格子轮廓
+    ctx.shadowBlur  = 6;
+    ctx.shadowColor = border;
+    ctx.strokeStyle = border;
+    ctx.lineWidth   = 2;
+    ctx.strokeRect(x, top, SKILL_BAR.cellWidth, SKILL_BAR.height);
+    ctx.shadowBlur  = 0;
+
+    // 内部填充
+    ctx.fillStyle = fill;
+    ctx.fillRect(x + 2, top + 2, SKILL_BAR.cellWidth - 4, SKILL_BAR.height - 4);
+
+    // 流动光泽（仅对高亮格，两格错开相位）
+    if (lit && !flash) {
+      const innerW = SKILL_BAR.cellWidth - 4;
+      const t      = ((now / 1400) + i * 0.5) % 1;
+      const gx     = x + 2 + innerW * t;
+      const grad   = ctx.createLinearGradient(gx - 24, 0, gx + 24, 0);
+      grad.addColorStop(0, 'rgba(255,255,255,0)');
+      grad.addColorStop(0.5, 'rgba(255,255,255,0.55)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(x + 2, top + 2, innerW, SKILL_BAR.height - 4);
+    }
+  }
+
+  // 两格中间上方的小号白色“反转”标签
+  ctx.globalAlpha  = 1;
+  ctx.fillStyle    = '#ffffff';
+  ctx.shadowBlur   = 4;
+  ctx.shadowColor  = '#00FFFF';
+  ctx.font         = '12px Consolas, monospace';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('反转', cx, top - 8);
+  ctx.restore();
+
+  // 清理已结束的闪烁
+  for (let i = flashes.length - 1; i >= 0; i--) {
+    if (now - flashes[i].start >= SKILL_BAR.flashDuration) flashes.splice(i, 1);
+  }
+}
+
+// 自定义十字准星：中央字母 + 外圈当前色光晕；常亮
+function drawCrosshair() {
+  const col = cursur.color;
+
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = col.hex;
+  ctx.fillStyle   = col.hex;
+  ctx.shadowBlur  = 14;
+  ctx.shadowColor = col.hex;
+
+  // 外圈光晕
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cursur.x, cursur.y, 16, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // 十字线
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(cursur.x - 22, cursur.y); ctx.lineTo(cursur.x - 6, cursur.y);
+  ctx.moveTo(cursur.x + 6,  cursur.y); ctx.lineTo(cursur.x + 22, cursur.y);
+  ctx.moveTo(cursur.x, cursur.y - 22); ctx.lineTo(cursur.x, cursur.y - 6);
+  ctx.moveTo(cursur.x, cursur.y + 6);  ctx.lineTo(cursur.x, cursur.y + 22);
+  ctx.stroke();
+
+  // 中央当前色首字母
+  ctx.shadowBlur = 0;
+  ctx.font = 'bold 13px Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(col.letter, cursur.x, cursur.y + 1);
+  ctx.restore();
+}
+
+/* ---------- 交互 ---------- */
+window.addEventListener('mousemove', (e) => {
+  cursur.x = e.clientX;
+  cursur.y = e.clientY;
+});
+
+window.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  shoot(e.clientX, e.clientY);
+});
+
+// 滚轮：向下滚动(deltaY>0)切下一个颜色，向上滚动(deltaY<0)切上一个颜色，循环切换
+window.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (!started || isPaused) return; // 未开始或暂停时禁用滚轮切色
+  if (e.deltaY > 0) {
+    cursur.colorIndex = (cursur.colorIndex + 1) % COLORS.length;                       // 下一个
+  } else if (e.deltaY < 0) {
+    cursur.colorIndex = (cursur.colorIndex - 1 + COLORS.length) % COLORS.length;       // 上一个
+  }
+}, { passive: false });
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (gameOver) { resetGame(); return; } // 死亡界面按空格直接重开（不回到开始界面）
+    if (isPaused) return;      // 暂停时禁用重力反转
+    if (e.repeat) return;          // 忽略长按自动重复，避免误耗次数
+    triggerReversal();
+  }
+});
+
+/* ---------- 开始游戏 ---------- */
+// 开始界面 / 死亡界面显示系统默认指针，进入游戏后隐藏系统指针改用自定义准星
+function updateCursorMode() {
+  const freeCursor = !started || gameOver;
+  document.body.classList.toggle('cursor-default', freeCursor);
+}
+
+function startGame() {
+  if (started || gameOver) return;
+  started = true;
+  startOverlay.classList.add('hidden');
+  gameStartTime = performance.now();   // 计时从点击“开始游戏”这一刻起算
+  lastTime      = gameStartTime;
+  spawnTimer    = currentSpawnInterval; // 首个方块按当前生成间隔出现
+  updateCursorMode();
+}
+startBtn.addEventListener('click', startGame);
+// 阻止点击按钮时误触发射冲击波
+startOverlay.addEventListener('mousedown', (e) => e.stopPropagation());
+
+/* ---------- 重开一局（不经过开始界面） ---------- */
+// 死亡后点“重新开始”或按空格都走这里：整局状态清零后立刻重开，开始界面只在首次进入程序时出现
+function resetGame() {
+  blocks.length    = 0;
+  blasts.length    = 0;
+  particles.length = 0;
+  flashes.length   = 0;
+  blockId          = 0;
+  combo            = 0;
+  maxCombo         = 0;
+  reversalsLeft    = REVERSAL_MAX;
+  difficultyProgress     = 0;
+  currentSpawnInterval   = DIFFICULTY_CONFIG.maxSpawnInterval;
+  spawnTimer       = DIFFICULTY_CONFIG.maxSpawnInterval;
+  totalPausedTime  = 0;
+  pauseStartTime   = 0;
+  isPaused         = false;
+  gameOver         = false;
+  cursur.colorIndex = 0;               // 准星颜色回到初始红色
+  cursur.x = W / 2;
+  cursur.y = H / 2;
+  gameStartTime = performance.now();   // 新一局重新计时
+  lastTime      = gameStartTime;
+  hudEl.textContent = 'Combo: 0 | 最高连击: 0\n存活：0.0s';
+  overlayEl.classList.add('hidden');   // 关闭死亡界面
+  helpOverlay.classList.add('hidden');
+  helpBtn.disabled = false;            // 恢复玩法说明按钮
+  updateCursorMode();
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+/* ---------- 玩法说明与暂停 ---------- */
+function pauseGame() {
+  if (gameOver || isPaused) return;
+  isPaused = true;
+  pauseStartTime = performance.now(); // 记录本次暂停起点
+  helpOverlay.classList.remove('hidden');
+}
+
+function resumeGame() {
+  if (!isPaused) return;
+  isPaused = false;
+  // 仅游戏开始后累计暂停时长（开始界面查看规则不影响计时）
+  if (started) totalPausedTime += performance.now() - pauseStartTime;
+  pauseStartTime = 0;
+  helpOverlay.classList.add('hidden');
+}
+
+// 阻止点击按钮/遮罩时误触发射冲击波
+helpBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+helpOverlay.addEventListener('mousedown', (e) => e.stopPropagation());
+helpBtn.addEventListener('click', pauseGame);
+helpCloseBtn.addEventListener('click', resumeGame);
+// 点击遮罩空白区域（非面板）关闭
+helpOverlay.addEventListener('click', (e) => {
+  if (e.target === helpOverlay) resumeGame();
+});
+
+/* ---------- 主循环（requestAnimationFrame） ---------- */
+function loop(now) {
+  const dt = Math.min(now - lastTime, 50); // 限制最大步长，防止切后台后跳帧
+  lastTime = now;
+  // 未开始游戏 / 暂停时跳过物理、生成与计时，rAF 继续渲染静态画面
+  if (started && !isPaused) update(dt);
+  if (!gameOver) {
+    draw(now);
+    rafId = requestAnimationFrame(loop);
+  }
+}
+
+/* ---------- 启动 ---------- */
+resize();
+updateCursorMode();            // 首屏为开始游戏界面：系统默认指针
+rafId = requestAnimationFrame(loop);
+</script>
+</body>
+</html>
