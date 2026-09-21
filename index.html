@@ -36,7 +36,7 @@
     position: fixed;
     top: 14px;                 /* 与 HUD 行水平对齐 */
     right: 16px;
-    z-index: 4;
+    z-index: 13;               /* 位于所有遮罩之上：死亡界面同样可以点击查看规则 */
     width: 36px;
     height: 36px;
     border-radius: 50%;
@@ -52,11 +52,39 @@
   #helpBtn:hover { background: rgba(255, 255, 255, 0.3); }
   #helpBtn:disabled { opacity: 0.35; cursor: default; }
 
+  /* 死亡界面提示（仅前两次死亡出现）：一行文字 + 弯曲箭头指向右上角问号 */
+  #deathHint {
+    position: fixed;
+    top: 6px;
+    right: 0;
+    z-index: 11;               /* 位于死亡遮罩之上 */
+    pointer-events: none;      /* 纯提示，不阻挡任何点击 */
+    animation: hintPulse 2.2s ease-in-out infinite;
+  }
+  #deathHint.hidden { display: none; }
+  #deathHint .hint-text {
+    fill: #ffffff;
+    font: 600 30px "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif; /* 字号为原先的 2 倍 */
+    letter-spacing: 2px;
+    filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.75));
+  }
+  #deathHint .hint-arrow {
+    fill: none;
+    stroke: #ffffff;
+    stroke-width: 4;          /* 箭头线宽为原先的 2 倍（箭头头部随线宽等比放大） */
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.85));
+  }
+  @keyframes hintPulse {
+    0%, 100% { opacity: 0.36; }  /* 变暗时的亮度为原先的一半 */
+    50%      { opacity: 1; }
+  }
+
   /* 玩法说明遮罩 */
   #helpOverlay {
     position: fixed;
     inset: 0;
-    z-index: 10;
+    z-index: 12;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -162,6 +190,21 @@
 <div id="hud">Combo: 0 | 最高连击: 0&#10;存活：0.0s</div>
 <button id="helpBtn" type="button">?</button>
 
+<!-- 死亡界面提示（仅前两次死亡出现）：文字末尾用弯曲箭头指向右上角问号 -->
+<div id="deathHint" class="hidden">
+  <svg width="380" height="160" viewBox="0 0 380 160" aria-hidden="true">
+    <defs>
+      <marker id="hintArrowHead" viewBox="0 0 10 10" refX="10" refY="5"
+              markerWidth="5" markerHeight="5" orient="auto" markerUnits="strokeWidth">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#ffffff" />
+      </marker>
+    </defs>
+    <text class="hint-text" x="274" y="90" text-anchor="end">点击？查看规则</text>
+    <path class="hint-arrow" d="M 284 86 C 350 106 364 82 340 48"
+          marker-end="url(#hintArrowHead)" />
+  </svg>
+</div>
+
 <div id="overlay" class="hidden">
   <div class="panel">
     <h1>游戏结束</h1>
@@ -188,7 +231,9 @@
       <div>🖱️ 左键点击——消除同色方块</div>
       <div>⚠️ 射错颜色——方块会分裂成2个小方块（继承下落速度，左右飞散）</div>
       <div>🔥 连击——连续消除放大冲击波范围</div>
-      <div>🚀 空格键——反转（所有方块原地转为向上飞，重力再慢慢拉回，仅限2次）</div>
+      <div>🚀 空格键——反转（所有方块原地转为向上飞，重力再慢慢拉回）</div>
+      <div>🔋 反转共 2 格充能：用掉一格后按每分钟 1 格线性恢复</div>
+      <div>⚪ 技能条：充能中为白色，充满一格转为青色，未充能部分为灰色</div>
       <div class="gap"></div>
       <div>⚡ 方块从静止开始持续加速下落</div>
       <div>⚡ 生成频率只随时间上升，45 秒达到最快（与场上方块数量无关）</div>
@@ -246,10 +291,12 @@ const SKILL_BAR = {
   gap: 10,            // 两格间距 px
   sideMargin: 5,      // 左右留白，使容器总宽正好 240px
   bottomOffset: 40,   // 距画布底部边缘 40px
-  fillColor: '#00FFFF',   // 高亮填充色
-  emptyColor: '#333333',  // 耗尽格暗灰色
-  emptyBorder: '#660000', // 0 次时的暗红色边框
-  flashDuration: 200      // 消耗熄灭闪烁时长 ms
+  fillColor: '#00FFFF',     // 已充满（可用）填色：青色
+  chargingColor: '#FFFFFF', // 正在充能（未满一格）填色：白色
+  emptyColor: '#333333',    // 未充能部分：灰色
+  flashDuration: 200,       // 消耗熄灭闪烁时长 ms
+  chargeDuration: 60000,    // 线性充满一格所需时长 ms（= 总进度的 50% / 每分钟）
+  rippleDuration: 500       // 充满一格瞬间的白色水波光晕时长 ms
 };
 
 /* ---------- DOM ---------- */
@@ -263,6 +310,7 @@ const startBtn  = document.getElementById('startBtn');
 const helpBtn   = document.getElementById('helpBtn');
 const helpOverlay = document.getElementById('helpOverlay');
 const helpCloseBtn = document.getElementById('helpCloseBtn');
+const deathHintEl  = document.getElementById('deathHint');
 retryBtn.addEventListener('click', () => resetGame()); // 重新开始：原局重置后直接重开（不再回到开始界面）
 
 /* ---------- 画布尺寸 ---------- */
@@ -293,7 +341,8 @@ const cursur = {
 /* ---------- 局内状态 ---------- */
 let combo         = 0;
 let maxCombo      = 0;
-let reversalsLeft = REVERSAL_MAX;
+let reversalCharge = REVERSAL_MAX;                          // 技能条实时进度（单位：格，0 ~ 2），线性恢复
+let deathCount     = 0;                                     // 本次打开页面的累计死亡次数（用于前两次死亡的提示）
 let difficultyProgress   = 0;                               // 难度进度 0~1（仅由存活时长决定）
 let currentSpawnInterval = DIFFICULTY_CONFIG.maxSpawnInterval; // 当前生成间隔
 let spawnTimer    = DIFFICULTY_CONFIG.maxSpawnInterval;
@@ -303,6 +352,7 @@ let isPaused      = false;    // 玩法说明暂停状态
 let totalPausedTime = 0;      // 累计暂停毫秒数
 let pauseStartTime  = 0;      // 本次暂停开始时间戳
 let flashes       = [];       // 技能格消耗闪烁（{ index, start }）
+let ripples       = [];       // 技能格充满瞬间的白色水波光晕（{ index, start }）
 let gameStartTime = performance.now(); // 点击“开始游戏”时重新计时
 let lastTime      = gameStartTime;
 let rafId         = null;
@@ -394,10 +444,12 @@ function shoot(x, y) {
 
 /* ---------- 重力反转 ---------- */
 function triggerReversal() {
-  if (!started || gameOver || reversalsLeft <= 0) return;
-  // 记录被消耗的格子，用于“由亮变暗”的 0.2s 熄灭反馈
-  flashes.push({ index: reversalsLeft - 1, start: performance.now() });
-  reversalsLeft -= 1;
+  if (!started || gameOver) return;
+  if (reversalCharge < 1) return;  // 未充满一格时无法使用技能
+  // 消耗一格进度（= 总进度的 50%）：记录被消耗的格子，用于 0.2s 熄灭反馈
+  // 已恢复的不足一格的进度不会被清空，而是平移到低一位的格子继续恢复
+  flashes.push({ index: Math.ceil(reversalCharge - 1e-6) - 1, start: performance.now() });
+  reversalCharge -= 1;
   // 一次性反转：方块位置不变、x 轴速度大小与方向不变，
   // 仅将 y 轴速度按原数值改为向上（保留速度大小，只翻转方向）。
   // 反转后加速度方向不变，仍持续向下，因此 vy 会按加速度常数线性回升
@@ -407,13 +459,20 @@ function triggerReversal() {
 /* ---------- 游戏结束 ---------- */
 function endGame() {
   gameOver = true;
-  helpBtn.disabled = true;     // 游戏结束后禁用玩法说明按钮
+  deathCount += 1;             // 累计死亡次数（前两次死亡界面显示查看规则提示）
   cancelAnimationFrame(rafId);
   document.getElementById('statTime').textContent  = ((performance.now() - gameStartTime - totalPausedTime) / 1000).toFixed(1);
   document.getElementById('statCombo').textContent = String(maxCombo);
   overlayEl.classList.remove('hidden');
   updateCursorMode();          // 死亡界面：恢复系统默认指针
+  updateDeathHint();           // 前两次死亡：显示“点击？查看规则”提示
   draw(performance.now());     // 重绘静态画面，清掉画布上残留的准星
+}
+
+/* ---------- 死亡界面提示（仅前两次死亡显示） ---------- */
+function updateDeathHint() {
+  const show = gameOver && deathCount >= 1 && deathCount <= 2 && !isPaused;
+  deathHintEl.classList.toggle('hidden', !show);
 }
 
 /* ---------- 每帧更新 ---------- */
@@ -467,6 +526,17 @@ function update(dt) {
     p.y += p.vy * step;
     p.age += dt;
     if (p.age >= PARTICLE_LIFETIME) particles.splice(i, 1);
+  }
+
+  // 反转技能条：游戏进行中持续线性恢复，60 秒充满一格（= 总进度的 50%）
+  if (reversalCharge < REVERSAL_MAX) {
+    const cellsBefore = Math.floor(reversalCharge + 1e-6);
+    reversalCharge = Math.min(REVERSAL_MAX, reversalCharge + dt / SKILL_BAR.chargeDuration);
+    const cellsNow = Math.floor(reversalCharge + 1e-6);
+    if (cellsNow > cellsBefore) {
+      // 刚充满一格：该格由白色转为青色，同时播放一圈白色水波光晕
+      ripples.push({ index: cellsNow - 1, start: performance.now() });
+    }
   }
 
   // 左上角 HUD：Combo、最高连击、存活时间（反转次数由底部技能条展示）
@@ -544,40 +614,50 @@ function drawBlasts(now) {
 }
 
 /* ---------- 重力反转技能条 ---------- */
-// 十六进制颜色线性插值（用于熄灭闪烁过渡）
-function lerpColor(hexA, hexB, t) {
-  const a = [parseInt(hexA.slice(1, 3), 16), parseInt(hexA.slice(3, 5), 16), parseInt(hexA.slice(5, 7), 16)];
-  const b = [parseInt(hexB.slice(1, 3), 16), parseInt(hexB.slice(3, 5), 16), parseInt(hexB.slice(5, 7), 16)];
-  const c = a.map((v, i) => Math.round(v + (b[i] - v) * t));
-  return `rgb(${c[0]},${c[1]},${c[2]})`;
+// 单格坐标（第 0 格在左、第 1 格在右）
+function skillCellRect(i) {
+  const left = W / 2 - SKILL_BAR.width / 2;
+  return {
+    x: left + SKILL_BAR.sideMargin + i * (SKILL_BAR.cellWidth + SKILL_BAR.gap),
+    y: H - SKILL_BAR.bottomOffset - SKILL_BAR.height, // 底部边缘上方 40px
+    w: SKILL_BAR.cellWidth,
+    h: SKILL_BAR.height
+  };
 }
 
-// 底部中央技能条：两个等宽格子对应 2 次重力反转，主循环每帧重绘实时同步
+// 圆角矩形路径（充能完成时的水波光晕用）
+function roundRectPath(x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.lineTo(x + w - rr, y);
+  ctx.arcTo(x + w, y, x + w, y + rr, rr);
+  ctx.lineTo(x + w, y + h - rr);
+  ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr);
+  ctx.lineTo(x + rr, y + h);
+  ctx.arcTo(x, y + h, x, y + h - rr, rr);
+  ctx.lineTo(x, y + rr);
+  ctx.arcTo(x, y, x + rr, y, rr);
+  ctx.closePath();
+}
+
+// 底部中央技能条：两个等宽格子 = 2 格充能进度（0 ~ 2），主循环每帧重绘实时同步
+// 颜色：未充能部分灰色 / 正在充能的格子白色 / 已充满的格子青色
 function drawSkillBar(now) {
-  const cx   = W / 2;
-  const top  = H - SKILL_BAR.bottomOffset - SKILL_BAR.height; // 底部边缘上方 40px
-  const left = cx - SKILL_BAR.width / 2;
-  const cellX = [
-    left + SKILL_BAR.sideMargin,
-    left + SKILL_BAR.sideMargin + SKILL_BAR.cellWidth + SKILL_BAR.gap
-  ];
-  const exhausted = reversalsLeft <= 0;
+  const cx        = W / 2;
+  const top       = H - SKILL_BAR.bottomOffset - SKILL_BAR.height; // 底部边缘上方 40px
+  const exhausted = reversalCharge <= 0;
 
   ctx.save();
   for (let i = 0; i < 2; i++) {
-    const x      = cellX[i];
-    const lit    = i < reversalsLeft;                       // 剩余次数决定高亮格
-    const border = exhausted ? SKILL_BAR.emptyBorder : SKILL_BAR.fillColor;
-    const flash  = flashes.find((f) => f.index === i);      // 本格是否在熄灭闪烁中
+    const rect   = skillCellRect(i);
+    const fill   = Math.max(0, Math.min(1, reversalCharge - i)); // 本格充能进度 0~1
+    const full   = fill >= 1;                                    // 本格是否已充满（青色）
+    const flash  = flashes.find((f) => f.index === i);           // 本格是否在熄灭闪烁中
+    // 边框：已充满的格子为青色；未充满（充能中或空格）一律为白色
+    const border = full ? SKILL_BAR.fillColor : SKILL_BAR.chargingColor;
 
-    // 填充色：高亮 / 暗灰 / 闪烁过渡（由亮到暗，0.2s）
-    let fill = lit ? SKILL_BAR.fillColor : SKILL_BAR.emptyColor;
-    if (flash) {
-      const p = Math.min((now - flash.start) / SKILL_BAR.flashDuration, 1);
-      fill = lerpColor(SKILL_BAR.fillColor, SKILL_BAR.emptyColor, p * p);
-    }
-
-    // 剩余 0 次时整条叠加 30% 透明度
+    // 0 格充能时整条叠加 30% 透明度
     ctx.globalAlpha = exhausted ? 0.3 : 1;
 
     // 微弱发光的格子轮廓
@@ -585,26 +665,63 @@ function drawSkillBar(now) {
     ctx.shadowColor = border;
     ctx.strokeStyle = border;
     ctx.lineWidth   = 2;
-    ctx.strokeRect(x, top, SKILL_BAR.cellWidth, SKILL_BAR.height);
+    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
     ctx.shadowBlur  = 0;
 
-    // 内部填充
-    ctx.fillStyle = fill;
-    ctx.fillRect(x + 2, top + 2, SKILL_BAR.cellWidth - 4, SKILL_BAR.height - 4);
+    // 未充能部分：灰色
+    ctx.fillStyle = SKILL_BAR.emptyColor;
+    ctx.fillRect(rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 4);
 
-    // 流动光泽（仅对高亮格，两格错开相位）
-    if (lit && !flash) {
-      const innerW = SKILL_BAR.cellWidth - 4;
+    // 已充能部分：未满一格为白色（线性充能中），充满一格为青色
+    if (fill > 0) {
+      ctx.fillStyle = full ? SKILL_BAR.fillColor : SKILL_BAR.chargingColor;
+      ctx.fillRect(rect.x + 2, rect.y + 2, (rect.w - 4) * fill, rect.h - 4);
+    }
+
+    // 消耗反馈：被消耗的格子叠加一层由亮到暗的 0.2s 熄灭闪烁
+    if (flash) {
+      const p = Math.min((now - flash.start) / SKILL_BAR.flashDuration, 1);
+      ctx.globalAlpha = (exhausted ? 0.3 : 1) * (1 - p);
+      ctx.fillStyle   = SKILL_BAR.fillColor;
+      ctx.fillRect(rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 4);
+      ctx.globalAlpha = exhausted ? 0.3 : 1;
+    }
+
+    // 流动光泽（仅对已充满的青色格，两格错开相位）
+    if (full && !flash) {
+      const innerW = rect.w - 4;
       const t      = ((now / 1400) + i * 0.5) % 1;
-      const gx     = x + 2 + innerW * t;
+      const gx     = rect.x + 2 + innerW * t;
       const grad   = ctx.createLinearGradient(gx - 24, 0, gx + 24, 0);
       grad.addColorStop(0, 'rgba(255,255,255,0)');
       grad.addColorStop(0.5, 'rgba(255,255,255,0.55)');
       grad.addColorStop(1, 'rgba(255,255,255,0)');
       ctx.fillStyle = grad;
-      ctx.fillRect(x + 2, top + 2, innerW, SKILL_BAR.height - 4);
+      ctx.fillRect(rect.x + 2, rect.y + 2, innerW, rect.h - 4);
     }
   }
+
+  // 充能完成的水波光晕：一圈白色长条光环围绕刚充满的青色格扩散并淡出（0.5s）
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const rp = ripples[i];
+    const p  = (now - rp.start) / SKILL_BAR.rippleDuration;
+    if (p >= 1) { ripples.splice(i, 1); continue; }
+    const rect = skillCellRect(rp.index);
+    for (let k = 0; k < 3; k++) {
+      const pk = Math.max(0, Math.min(1, (p - k * 0.12) / 0.76)); // 三圈相位错开，如水波
+      if (pk <= 0) continue;
+      const grow = 2 + 16 * pk;
+      ctx.globalAlpha = (1 - pk) * (0.9 / (1 + k * 0.7));
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth   = 2.6 - k * 0.6;
+      ctx.shadowBlur  = 16;
+      ctx.shadowColor = '#ffffff';
+      roundRectPath(rect.x - grow, rect.y - grow, rect.w + grow * 2, rect.h + grow * 2, 3 + grow * 0.6);
+      ctx.stroke();
+    }
+  }
+  ctx.shadowBlur  = 0;
+  ctx.globalAlpha = 1;
 
   // 两格中间上方的小号白色“反转”标签
   ctx.globalAlpha  = 1;
@@ -683,8 +800,8 @@ window.addEventListener('wheel', (e) => {
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
+    if (isPaused) return;          // 规则遮罩开启时不响应（含死亡界面查看规则）
     if (gameOver) { resetGame(); return; } // 死亡界面按空格直接重开（不回到开始界面）
-    if (isPaused) return;      // 暂停时禁用重力反转
     if (e.repeat) return;          // 忽略长按自动重复，避免误耗次数
     triggerReversal();
   }
@@ -717,10 +834,11 @@ function resetGame() {
   blasts.length    = 0;
   particles.length = 0;
   flashes.length   = 0;
+  ripples.length   = 0;
   blockId          = 0;
   combo            = 0;
   maxCombo         = 0;
-  reversalsLeft    = REVERSAL_MAX;
+  reversalCharge   = REVERSAL_MAX;     // 技能条回到满充能
   difficultyProgress     = 0;
   currentSpawnInterval   = DIFFICULTY_CONFIG.maxSpawnInterval;
   spawnTimer       = DIFFICULTY_CONFIG.maxSpawnInterval;
@@ -736,37 +854,39 @@ function resetGame() {
   hudEl.textContent = 'Combo: 0 | 最高连击: 0\n存活：0.0s';
   overlayEl.classList.add('hidden');   // 关闭死亡界面
   helpOverlay.classList.add('hidden');
-  helpBtn.disabled = false;            // 恢复玩法说明按钮
+  updateDeathHint();                   // 重开后隐藏死亡界面提示
   updateCursorMode();
   cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(loop);
 }
 
-/* ---------- 玩法说明与暂停 ---------- */
-function pauseGame() {
-  if (gameOver || isPaused) return;
+/* ---------- 玩法说明（游戏中暂停 / 开始界面与死亡界面仅查看规则） ---------- */
+function openHelp() {
+  if (isPaused) return;
   isPaused = true;
-  pauseStartTime = performance.now(); // 记录本次暂停起点
+  // 仅游戏进行中才记录暂停起点（开始界面与死亡界面查看规则不影响计时）
+  pauseStartTime = (started && !gameOver) ? performance.now() : 0;
   helpOverlay.classList.remove('hidden');
+  updateDeathHint();
 }
 
-function resumeGame() {
+function closeHelp() {
   if (!isPaused) return;
   isPaused = false;
-  // 仅游戏开始后累计暂停时长（开始界面查看规则不影响计时）
-  if (started) totalPausedTime += performance.now() - pauseStartTime;
+  if (pauseStartTime) totalPausedTime += performance.now() - pauseStartTime;
   pauseStartTime = 0;
   helpOverlay.classList.add('hidden');
+  updateDeathHint();
 }
 
 // 阻止点击按钮/遮罩时误触发射冲击波
 helpBtn.addEventListener('mousedown', (e) => e.stopPropagation());
 helpOverlay.addEventListener('mousedown', (e) => e.stopPropagation());
-helpBtn.addEventListener('click', pauseGame);
-helpCloseBtn.addEventListener('click', resumeGame);
+helpBtn.addEventListener('click', openHelp);
+helpCloseBtn.addEventListener('click', closeHelp);
 // 点击遮罩空白区域（非面板）关闭
 helpOverlay.addEventListener('click', (e) => {
-  if (e.target === helpOverlay) resumeGame();
+  if (e.target === helpOverlay) closeHelp();
 });
 
 /* ---------- 主循环（requestAnimationFrame） ---------- */
